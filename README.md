@@ -18,11 +18,8 @@
 
 ## 🛠 Prerequisites
 
-Nothing!
-
-Literally just run the script. If Docker Desktop is missing, the script will automatically download the installer for you. 
-
-*You will need a free [ngrok.com](https://ngrok.com) Authtoken when you launch the GUI, which takes 30 seconds to copy/paste.*
+Please ensure you have **Docker** installed on your system.
+You can download and install Docker Desktop from the [official Docker website](https://docs.docker.com/get-docker/).
 
 ---
 
@@ -30,57 +27,59 @@ Literally just run the script. If Docker Desktop is missing, the script will aut
 
 ### 1. Clone the repo
 
+First, download the repository and navigate into the **`excalidraw/launcher`** directory from the start:
+
 ```bash
 git clone https://github.com/excalidraw/excalidraw.git
-cd excalidraw
+cd excalidraw/launcher
 ```
 
-### 2. Start the Control Panel
+### 2. Setup and Run with Docker
 
-**On Windows:**
-Double-click the `ExcalidrawLauncher.bat` file in the `launcher` folder, or run:
+Here are the setup and run commands for your operating system. We will use Docker to build and start the application easily.
+
+**On Windows (PowerShell):**
 ```powershell
-powershell -ExecutionPolicy Bypass -File "launcher\launch.ps1"
+# docker-compose up: Starts the containers
+# -d: Runs the containers in the background (detached mode)
+# --build: Forces a rebuild of the Docker image to ensure you have the latest changes
+docker-compose up -d --build
 ```
 
 **On Linux / macOS:**
 ```bash
-chmod +x launcher/launch.sh
-./launcher/launch.sh
+# docker-compose up: Starts the containers
+# -d: Runs the containers in the background (detached mode)
+# --build: Forces a rebuild of the Docker image to ensure you have the latest changes
+docker-compose up -d --build
 ```
 
-### 3. Share & Collaborate
+### 3. Open the Launcher
 
-1. The script will automatically open your web browser to `http://localhost:7842`.
-2. Paste your ngrok Authtoken (it saves automatically).
-3. Click **Start Secure Session**.
-4. Send the **Magic Link** shown on the screen to your friends. They click it and are instantly securely connected!
-5. When finished, press **Stop Session**. Everything spins down cleanly.
+Once the Docker container is running, open your web browser and navigate to the Control Panel at:
+`http://localhost:7842`
 
----
+### 4. Stopping the Application
 
-## 🛡 How Secure Is It?
+When you are finished, you can stop the server and clean up the containers by running:
 
+```bash
+# docker-compose down: Stops and removes the containers and networks created by 'up'
+docker-compose down
 ```
-Desktop shortcut  ──▶  GUI Control Panel (localhost:7842)
-                         │
-                         ▼ (Starts Docker Compose)
-                 Excalidraw dev container (port 3001)
-                         ▲
-                 Token + cookie auth proxy container
-                         ▲
-                 ngrok HTTPS tunnel container
-                         ▲
-               https://xxxx.ngrok-free.app/TOKEN  ← magic link
-```
-
-1. **64-character hex token**: Infeasible to brute force. Generated fresh every session.
-2. **HMAC Session Cookies**: Once the token is visited, a signed cookie is created. All subsequent WebSockets (collaboration) are protected by this cookie.
-3. **Container Isolation**: Excalidraw binds to `0.0.0.0` but only exists on an internal Docker network. Nothing on your host network can hit the unauthenticated dev server directly.
 
 ---
 
 ## 🧰 Troubleshooting
 
-- **The build is taking forever?** The very first time you click "Start Session", Docker has to download the Node.js image and run `yarn install`. The GUI features a live log viewer so you can see exactly what it's downloading. Subsequent starts take less than 5 seconds.
-- **Docker auto-install on Windows asks for a reboot:** Docker Desktop requires virtualization features. Let it reboot, then run the launcher script again.
+- **The build is taking forever?** The first time you run `docker-compose up -d --build`, Docker needs to download the necessary images and install dependencies. This may take a few minutes. Subsequent starts will be much faster!
+
+---
+
+## 📸 Screenshots
+
+![Screenshot 1](projectimages/Screenshot%202026-05-31%20010804.png)
+![Screenshot 2](projectimages/Screenshot%202026-05-31%20194334.png)
+![Screenshot 3](projectimages/Screenshot%202026-05-31%20194437.png)
+![Screenshot 4](projectimages/Screenshot%202026-05-31%20194457.png)
+![Screenshot 5](projectimages/Screenshot%202026-05-31%20194514.png)
