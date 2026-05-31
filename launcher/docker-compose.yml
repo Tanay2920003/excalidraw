@@ -15,6 +15,11 @@ services:
     build:
       context: ..
       dockerfile: launcher/Dockerfile.excalidraw
+    environment:
+      # Injected after ngrok is ready (two-phase start in gui/server.js).
+      # Vite bakes this at startup so all clients (local + remote) connect
+      # collab socket to the public ngrok URL, which proxies back to Vite.
+      - VITE_APP_WS_SERVER_URL=${PUBLIC_URL:-}
     networks:
       - internal
     profiles:
@@ -25,8 +30,8 @@ services:
       context: .
       dockerfile: Dockerfile.proxy
     environment:
-      - AUTH_TOKEN=${AUTH_TOKEN}
-      - SESSION_SECRET=${SESSION_SECRET}
+      - AUTH_USER=${AUTH_USER}
+      - AUTH_PASS=${AUTH_PASS}
       - TARGET_HOST=excalidraw
       - TARGET_PORT=3001
       - PROXY_PORT=8080

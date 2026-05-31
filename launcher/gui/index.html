@@ -144,11 +144,9 @@
             statusText.style.color = '#a6e3a1';
             magicLinkBox.style.display = 'block';
             magicLinkSpan.innerText = data.magicLink;
-            // The magic link is ngrok URL + token. Local is localhost:8080 + token
-            const token = data.magicLink.split('/').pop();
-            const localUrl = 'http://localhost:8080/' + token;
-            localLink.href = localUrl;
-            localLink.innerText = localUrl;
+            // Use the pre-computed local basic auth link from the backend
+            localLink.href = data.localLink;
+            localLink.innerText = data.localLink;
           } else {
             statusText.innerHTML = '<div class="loader"></div> Waiting for public URL...';
             statusText.style.color = '#f9e2af';

@@ -5,36 +5,16 @@ const { exec, spawn } = require('child_process');
 const crypto = require('crypto');
 
 const PORT = 7842;
-const ENV_PATH = path.join(__dirname, '..', '.env');
 const COMPOSE_DIR = path.join(__dirname, '..');
 
 let sessionActive = false;
-let currentAuthToken = '';
+let currentAuthUser = '';
+let currentAuthPass = '';
 let currentNgrokUrl = '';
+let currentNgrokToken = '';
 let isStarting = false;
 let hasError = false;
 let buildLogs = [];
-
-function readEnv() {
-  if (!fs.existsSync(ENV_PATH)) return {};
-  const content = fs.readFileSync(ENV_PATH, 'utf8');
-  const env = {};
-  content.split('\n').forEach(line => {
-    const match = line.match(/^([^=]+)=(.*)$/);
-    if (match) {
-      env[match[1].trim()] = match[2].trim();
-    }
-  });
-  return env;
-}
-
-function writeEnv(env) {
-  let content = '';
-  for (const [k, v] of Object.entries(env)) {
-    content += `${k}=${v}\n`;
-  }
-  fs.writeFileSync(ENV_PATH, content, 'utf8');
-}
 
 // Check if Docker images already exist so we can skip rebuilding
 function imagesExist() {
@@ -79,14 +59,18 @@ const server = http.createServer((req, res) => {
 
   if (req.url === '/api/status' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    const env = readEnv();
     res.end(JSON.stringify({
-      ngrokTokenConfigured: !!env.NGROK_AUTHTOKEN,
-      ngrokToken: env.NGROK_AUTHTOKEN || '',
+      ngrokTokenConfigured: !!currentNgrokToken,
+      ngrokToken: currentNgrokToken,
       sessionActive,
       isStarting,
       hasError,
-      magicLink: currentAuthToken && currentNgrokUrl ? `${currentNgrokUrl}/${currentAuthToken}` : null
+      magicLink: currentAuthUser && currentNgrokUrl 
+        ? currentNgrokUrl.replace('https://', `https://${currentAuthUser}:${currentAuthPass}@`)
+        : null,
+      localLink: currentAuthUser 
+        ? `http://${currentAuthUser}:${currentAuthPass}@localhost:8080`
+        : null
     }));
     return;
   }
@@ -103,9 +87,9 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       try {
         const { ngrokToken } = JSON.parse(body);
-        const env = readEnv();
-        env.NGROK_AUTHTOKEN = ngrokToken;
-        writeEnv(env);
+        if (ngrokToken && ngrokToken.trim()) {
+          currentNgrokToken = ngrokToken.trim();
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
       } catch (e) {
@@ -119,26 +103,22 @@ const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', chunk => body += chunk);
     req.on('end', () => {
-      const env = readEnv();
-
       // Allow overriding the ngrok token at start time
       try {
         const parsed = JSON.parse(body);
         if (parsed.ngrokToken && parsed.ngrokToken.trim()) {
-          env.NGROK_AUTHTOKEN = parsed.ngrokToken.trim();
+          currentNgrokToken = parsed.ngrokToken.trim();
         }
       } catch {}
 
-      if (!env.NGROK_AUTHTOKEN) {
+      if (!currentNgrokToken) {
         res.writeHead(400); res.end(JSON.stringify({ error: 'Ngrok token missing' }));
         return;
       }
 
-      currentAuthToken = crypto.randomBytes(32).toString('hex');
-      const sessionSecret = crypto.randomBytes(32).toString('hex');
-      env.AUTH_TOKEN = currentAuthToken;
-      env.SESSION_SECRET = sessionSecret;
-      writeEnv(env);
+      currentAuthUser = crypto.randomBytes(6).toString('hex');
+      currentAuthPass = crypto.randomBytes(12).toString('hex');
+      currentNgrokUrl = '';
 
       isStarting = true;
       hasError = false;
@@ -146,62 +126,113 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, message: 'Starting...' }));
 
-      // If images already exist, skip build for faster startup
+      const composeEnv = Object.assign({}, process.env, {
+        NGROK_AUTHTOKEN: currentNgrokToken,
+        AUTH_USER: currentAuthUser,
+        AUTH_PASS: currentAuthPass
+      });
+
+      // ── PHASE 1: Start proxy + ngrok, then wait for public URL ─────────────
       const hasImages = imagesExist();
-      const args = ['compose', '--project-directory', COMPOSE_DIR, '--profile', 'session', 'up', '-d'];
-      if (!hasImages) {
-        args.push('--build');
-      }
-      args.push('excalidraw', 'proxy', 'ngrok');
+      const phase1Args = ['compose', '--project-directory', COMPOSE_DIR, '--profile', 'session', 'up', '-d'];
+      if (!hasImages) phase1Args.push('--build');
+      phase1Args.push('proxy', 'ngrok');
 
       buildLogs.push(hasImages
         ? '✓ Using cached images (skipping build)\n\n'
         : '⏳ Building images for the first time (this may take a few minutes)...\n\n'
       );
+      buildLogs.push('▶ Phase 1: Starting proxy + ngrok...\n');
 
-      const child = spawn('docker', args);
+      const phase1 = spawn('docker', phase1Args, { env: composeEnv });
 
-      child.stdout.on('data', data => {
+      phase1.stdout.on('data', data => {
         const str = data.toString();
         process.stdout.write(str);
         buildLogs.push(str);
         if (buildLogs.length > 500) buildLogs.shift();
       });
 
-      child.stderr.on('data', data => {
+      phase1.stderr.on('data', data => {
         const str = data.toString();
         process.stderr.write(str);
         buildLogs.push(str);
         if (buildLogs.length > 500) buildLogs.shift();
       });
 
-      child.on('close', code => {
-        isStarting = false;
+      phase1.on('close', code => {
         if (code !== 0) {
-          console.error('Docker compose exited with code ' + code);
-          buildLogs.push('\n✗ Process failed with exit code ' + code);
-          sessionActive = false;
+          isStarting = false;
           hasError = true;
+          buildLogs.push('\n✗ Phase 1 failed with exit code ' + code);
+          sessionActive = false;
           return;
         }
 
-        sessionActive = true;
-        // Poll for ngrok URL
+        buildLogs.push('\n✓ Proxy + ngrok are up. Waiting for public URL...\n');
+
+        // Poll for the ngrok public URL (up to 60s)
         let attempts = 0;
-        const interval = setInterval(async () => {
+        const poll = setInterval(async () => {
           attempts++;
           const url = await getNgrokUrl();
           if (url) {
+            clearInterval(poll);
             currentNgrokUrl = url;
-            clearInterval(interval);
+            buildLogs.push(`✓ Got public URL: ${url}\n`);
+
+            // ── PHASE 2: Start excalidraw with PUBLIC_URL ──────────
+            buildLogs.push('\n▶ Phase 2: Starting excalidraw with injected WS URL...\n');
+
+            const phase2Env = Object.assign({}, composeEnv, {
+              PUBLIC_URL: url
+            });
+
+            const phase2Args = ['compose', '--project-directory', COMPOSE_DIR, '--profile', 'session', 'up', '-d'];
+            if (!hasImages) phase2Args.push('--build');
+            phase2Args.push('excalidraw');
+
+            const phase2 = spawn('docker', phase2Args, { env: phase2Env });
+
+            phase2.stdout.on('data', data => {
+              const str = data.toString();
+              process.stdout.write(str);
+              buildLogs.push(str);
+              if (buildLogs.length > 500) buildLogs.shift();
+            });
+
+            phase2.stderr.on('data', data => {
+              const str = data.toString();
+              process.stderr.write(str);
+              buildLogs.push(str);
+              if (buildLogs.length > 500) buildLogs.shift();
+            });
+
+            phase2.on('close', code2 => {
+              isStarting = false;
+              if (code2 !== 0) {
+                buildLogs.push('\n✗ Phase 2 (excalidraw) failed with exit code ' + code2);
+                sessionActive = false;
+                hasError = true;
+              } else {
+                buildLogs.push('\n✓ All containers up. Session is live!\n');
+                sessionActive = true;
+              }
+            });
+
           } else if (attempts > 60) {
-            clearInterval(interval);
+            clearInterval(poll);
+            isStarting = false;
+            hasError = true;
+            buildLogs.push('\n✗ Timed out waiting for ngrok public URL after 60s.');
+            sessionActive = false;
           }
         }, 1000);
       });
     });
     return;
   }
+
 
   if (req.url === '/api/stop' && req.method === 'POST') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -211,7 +242,8 @@ const server = http.createServer((req, res) => {
       sessionActive = false;
       isStarting = false;
       hasError = false;
-      currentAuthToken = '';
+      currentAuthUser = '';
+      currentAuthPass = '';
       currentNgrokUrl = '';
     });
     return;
@@ -262,3 +294,4 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`GUI Server running on http://0.0.0.0:${PORT}`);
 });
+
