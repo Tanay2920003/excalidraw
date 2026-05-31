@@ -108,7 +108,13 @@ proxy.on('error', (err, req, res) => {
 // ── HTTP server ───────────────────────────────────────────────────────────────
 const server = http.createServer((req, res) => {
   if (isAuthenticated(req)) {
-    proxy.web(req, res);
+    if (req.url && req.url.startsWith('/socket.io/')) {
+      proxy.web(req, res, { target: 'http://excalidraw-room:3002' });
+    } else if (req.url && req.url.startsWith('/api/v2/')) {
+      proxy.web(req, res, { target: 'http://excalidraw-storage-backend:8080' });
+    } else {
+      proxy.web(req, res);
+    }
     return;
   }
 
@@ -132,9 +138,15 @@ server.on('upgrade', (req, socket, head) => {
     socket.destroy();
     return;
   }
-  proxy.ws(req, socket, head, {}, (err) => {
-    if (err) console.error('[PROXY] WS error:', err.message);
-  });
+  if (req.url && req.url.startsWith('/socket.io/')) {
+    proxy.ws(req, socket, head, { target: 'http://excalidraw-room:3002' }, (err) => {
+      if (err) console.error('[PROXY] WS (collab) error:', err.message);
+    });
+  } else {
+    proxy.ws(req, socket, head, {}, (err) => {
+      if (err) console.error('[PROXY] WS error:', err.message);
+    });
+  }
 });
 
 server.on('error', (err) => console.error('[PROXY] Server error:', err.message));

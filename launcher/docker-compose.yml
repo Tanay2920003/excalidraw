@@ -20,6 +20,39 @@ services:
       # Vite bakes this at startup so all clients (local + remote) connect
       # collab socket to the public ngrok URL, which proxies back to Vite.
       - VITE_APP_WS_SERVER_URL=${PUBLIC_URL:-}
+      - VITE_APP_BACKEND_V2_GET_URL=/api/v2/
+      - VITE_APP_BACKEND_V2_POST_URL=/api/v2/
+    networks:
+      - internal
+    profiles:
+      - session
+
+  excalidraw-room:
+    image: excalidraw/excalidraw-room:latest
+    ports:
+      - "3002:3002"
+    networks:
+      - internal
+    profiles:
+      - session
+
+  redis:
+    image: redis:alpine
+    container_name: excalidraw-redis
+    volumes:
+      - ./redis-data:/data
+    networks:
+      - internal
+    profiles:
+      - session
+
+  excalidraw-storage-backend:
+    image: kiliandeca/excalidraw-storage-backend:latest
+    container_name: excalidraw-storage-backend
+    environment:
+      - STORAGE_URI=redis://redis:6379
+    depends_on:
+      - redis
     networks:
       - internal
     profiles:
