@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Excalidraw Secure Launcher</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; background: #1e1e2e; color: #cdd6f4; margin: 0; padding: 40px; display: flex; justify-content: center; }
+    .container { background: #313244; padding: 30px; border-radius: 12px; width: 100%; max-width: 550px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    h1 { margin-top: 0; color: #f38ba8; text-align: center; }
+    label { display: block; margin-bottom: 8px; font-weight: bold; }
+    input { width: 100%; padding: 12px; margin-bottom: 20px; border-radius: 6px; border: 1px solid #45475a; background: #181825; color: #cdd6f4; box-sizing: border-box; }
+    button { width: 100%; padding: 14px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 16px; margin-bottom: 10px; transition: 0.2s; }
+    .btn-primary { background: #89b4fa; color: #11111b; }
+    .btn-primary:hover { background: #b4befe; }
+    .btn-danger { background: #f38ba8; color: #11111b; }
+    .btn-danger:hover { background: #eba0ac; }
+    .btn-secondary { background: #45475a; color: #cdd6f4; }
+    .btn-secondary:hover { background: #585b70; }
+    .status-panel { background: #181825; padding: 20px; border-radius: 8px; margin-top: 20px; text-align: center; }
+    .magic-link-box { margin-top: 15px; text-align: left; display: none; }
+    .magic-link { color: #a6e3a1; word-break: break-all; font-family: monospace; font-size: 14px; padding: 12px; background: #1e1e2e; border-radius: 4px; display: block; margin-top: 5px; }
+    .hint { font-size: 13px; color: #a6adc8; margin-top: 5px; }
+    .loader { border: 3px solid #45475a; border-top: 3px solid #89b4fa; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-right: 10px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .token-row { display: flex; gap: 8px; align-items: center; margin-bottom: 15px; }
+    .token-row input { margin-bottom: 0; flex: 1; font-size: 13px; padding: 10px; }
+    .token-row button { width: auto; padding: 10px 16px; margin-bottom: 0; font-size: 13px; white-space: nowrap; }
+    .token-toggle { background: none; border: none; color: #89b4fa; cursor: pointer; font-size: 12px; padding: 0; margin: 0 0 10px 0; width: auto; text-decoration: underline; }
+    .token-toggle:hover { color: #b4befe; }
+    .saved-flash { color: #a6e3a1; font-size: 12px; margin-left: 8px; opacity: 0; transition: opacity 0.3s; }
+    .saved-flash.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Excalidraw Launcher</h1>
+    
+    <div id="config-section" style="display: none;">
+      <p style="color: #bac2de; text-align: center; margin-bottom: 20px;">
+        To expose the session securely, you need a free ngrok authtoken.
+      </p>
+      <label>Ngrok Authtoken</label>
+      <input type="password" id="ngrokToken" placeholder="Paste your authtoken here">
+      <button class="btn-primary" onclick="saveConfig()">Save Configuration</button>
+      <p class="hint" style="text-align: center;">Get yours at <a href="https://dashboard.ngrok.com/get-started/your-authtoken" target="_blank" style="color:#89b4fa;">ngrok.com</a></p>
+    </div>
+
+    <div id="status-panel" class="status-panel" style="display: none;">
+      <h3 style="margin-top: 0;">Session Control</h3>
+      
+      <div id="status-text" style="font-size: 1.1em; margin-bottom: 20px; color: #f9e2af;">Checking status...</div>
+      
+      <div id="log-container" style="display: none; margin-top: 15px; text-align: left; background: #11111b; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 12px; color: #a6adc8; height: 180px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;"></div>
+
+      <div id="magic-link-box" class="magic-link-box">
+        <label>Share this secure link with collaborators:</label>
+        <div style="display: flex; gap: 8px; align-items: center; margin-top: 5px;">
+          <span id="magic-link" class="magic-link" style="margin-top: 0; flex: 1;"></span>
+          <button class="btn-secondary" style="width: auto; margin-bottom: 0; padding: 12px 16px;" onclick="copyToClipboard('magic-link', this)">Copy</button>
+        </div>
+        <p class="hint">They can click it to join instantly. No password required.</p>
+        <div style="margin-top:15px; background: #1e1e2e; padding: 12px; border-radius: 4px; display: flex; gap: 8px; align-items: center;">
+          <strong style="color: #a6adc8; font-size: 14px; white-space: nowrap;">Your local view:</strong>
+          <a id="local-link" href="#" target="_blank" style="color:#89b4fa; flex: 1; font-size: 14px; word-break: break-all;">Open in new tab</a>
+          <button class="btn-secondary" style="width: auto; margin-bottom: 0; padding: 8px 12px; font-size: 12px;" onclick="copyToClipboard('local-link', this, true)">Copy</button>
+        </div>
+      </div>
+
+      <!-- Ngrok token editor (inline, next to start) -->
+      <div id="token-editor" style="display: none; margin-bottom: 15px;">
+        <button class="token-toggle" id="token-toggle-btn" onclick="toggleTokenEditor()">▸ Change ngrok token</button>
+        <div id="token-edit-row" style="display: none;">
+          <div class="token-row">
+            <input type="password" id="editNgrokToken" placeholder="Enter new ngrok authtoken">
+            <button class="btn-secondary" onclick="saveTokenInline()">Save</button>
+          </div>
+          <span class="saved-flash" id="save-flash">✓ Saved</span>
+          <p class="hint" style="margin-top: 0;">Get yours at <a href="https://dashboard.ngrok.com/get-started/your-authtoken" target="_blank" style="color:#89b4fa;">ngrok.com</a></p>
+        </div>
+      </div>
+      
+      <button id="start-btn" class="btn-primary" style="display:none;" onclick="startSession()">Start Secure Session</button>
+      <button id="stop-btn" class="btn-danger" style="display:none;" onclick="stopSession()">Stop Session</button>
+    </div>
+  </div>
+
+  <script>
+    let tokenEditorOpen = false;
+
+    function toggleTokenEditor() {
+      tokenEditorOpen = !tokenEditorOpen;
+      document.getElementById('token-edit-row').style.display = tokenEditorOpen ? 'block' : 'none';
+      document.getElementById('token-toggle-btn').textContent = tokenEditorOpen ? '▾ Change ngrok token' : '▸ Change ngrok token';
+    }
+
+    async function saveTokenInline() {
+      const token = document.getElementById('editNgrokToken').value.trim();
+      if (!token) return alert('Token is required.');
+      await fetch('/api/config', { method: 'POST', body: JSON.stringify({ ngrokToken: token }) });
+      const flash = document.getElementById('save-flash');
+      flash.classList.add('show');
+      setTimeout(() => flash.classList.remove('show'), 2000);
+      document.getElementById('editNgrokToken').value = '';
+    }
+
+    async function updateStatus() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        
+        document.getElementById('config-section').style.display = data.ngrokTokenConfigured ? 'none' : 'block';
+        document.getElementById('status-panel').style.display = data.ngrokTokenConfigured ? 'block' : 'none';
+        
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const magicLinkBox = document.getElementById('magic-link-box');
+        const magicLinkSpan = document.getElementById('magic-link');
+        const statusText = document.getElementById('status-text');
+        const localLink = document.getElementById('local-link');
+        const tokenEditor = document.getElementById('token-editor');
+
+        if (data.isStarting) {
+          startBtn.style.display = 'none';
+          stopBtn.style.display = 'none';
+          magicLinkBox.style.display = 'none';
+          tokenEditor.style.display = 'none';
+          statusText.innerHTML = '<div class="loader"></div> Starting containers (may take a few minutes)...';
+          
+          document.getElementById('log-container').style.display = 'block';
+          try {
+            const logsRes = await fetch('/api/logs');
+            const logsData = await logsRes.json();
+            const logEl = document.getElementById('log-container');
+            logEl.innerText = logsData.logs || 'Initializing build...';
+            logEl.scrollTop = logEl.scrollHeight;
+          } catch (e) {}
+        } else if (data.sessionActive) {
+          startBtn.style.display = 'none';
+          stopBtn.style.display = 'block';
+          tokenEditor.style.display = 'none';
+          document.getElementById('log-container').style.display = 'none';
+          if (data.magicLink) {
+            statusText.innerText = 'Session is LIVE';
+            statusText.style.color = '#a6e3a1';
+            magicLinkBox.style.display = 'block';
+            magicLinkSpan.innerText = data.magicLink;
+            // The magic link is ngrok URL + token. Local is localhost:8080 + token
+            const token = data.magicLink.split('/').pop();
+            const localUrl = 'http://localhost:8080/' + token;
+            localLink.href = localUrl;
+            localLink.innerText = localUrl;
+          } else {
+            statusText.innerHTML = '<div class="loader"></div> Waiting for public URL...';
+            statusText.style.color = '#f9e2af';
+            magicLinkBox.style.display = 'none';
+          }
+        } else {
+          startBtn.style.display = 'block';
+          stopBtn.style.display = 'none';
+          magicLinkBox.style.display = 'none';
+          tokenEditor.style.display = 'block';
+          
+          if (data.hasError) {
+            document.getElementById('log-container').style.display = 'block';
+            statusText.innerText = 'Session start failed. Check logs.';
+            statusText.style.color = '#f38ba8';
+            try {
+              const logsRes = await fetch('/api/logs');
+              const logsData = await logsRes.json();
+              const logEl = document.getElementById('log-container');
+              logEl.innerText = logsData.logs || 'No logs available.';
+              logEl.scrollTop = logEl.scrollHeight;
+            } catch (e) {}
+          } else {
+            document.getElementById('log-container').style.display = 'none';
+            statusText.innerText = 'Session is stopped.';
+            statusText.style.color = '#bac2de';
+          }
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function saveConfig() {
+      const token = document.getElementById('ngrokToken').value.trim();
+      if (!token) return alert('Token is required.');
+      await fetch('/api/config', { method: 'POST', body: JSON.stringify({ ngrokToken: token }) });
+      updateStatus();
+    }
+
+    async function startSession() {
+      document.getElementById('status-text').innerHTML = '<div class="loader"></div> Preparing to start...';
+      document.getElementById('start-btn').style.display = 'none';
+      document.getElementById('token-editor').style.display = 'none';
+      await fetch('/api/start', { method: 'POST', body: '{}' });
+      updateStatus();
+    }
+
+    async function stopSession() {
+      document.getElementById('status-text').innerHTML = '<div class="loader"></div> Stopping...';
+      document.getElementById('stop-btn').style.display = 'none';
+      document.getElementById('magic-link-box').style.display = 'none';
+      await fetch('/api/stop', { method: 'POST' });
+      updateStatus();
+    }
+
+    async function copyToClipboard(elementId, btn, isLink = false) {
+      const el = document.getElementById(elementId);
+      const text = isLink ? el.href : el.innerText;
+      try {
+        await navigator.clipboard.writeText(text);
+        const oldText = btn.innerText;
+        btn.innerText = 'Copied!';
+        btn.style.background = '#a6e3a1';
+        btn.style.color = '#11111b';
+        setTimeout(() => {
+          btn.innerText = oldText;
+          btn.style.background = '';
+          btn.style.color = '';
+        }, 2000);
+      } catch(err) {
+        alert('Failed to copy to clipboard.');
+      }
+    }
+
+    setInterval(updateStatus, 2000);
+    updateStatus();
+  </script>
+</body>
+</html>

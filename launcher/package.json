@@ -1,0 +1,9 @@
+{
+  "name": "excalidraw-auth-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Secure auth proxy for Excalidraw sessions",
+  "dependencies": {
+    "http-proxy": "1.18.1"
+  }
+}

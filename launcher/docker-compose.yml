@@ -1,0 +1,58 @@
+services:
+  gui:
+    build:
+      context: ..
+      dockerfile: launcher/Dockerfile.gui
+    ports:
+      - "7842:7842"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ..:/app
+    networks:
+      - internal
+
+  excalidraw:
+    build:
+      context: ..
+      dockerfile: launcher/Dockerfile.excalidraw
+    networks:
+      - internal
+    profiles:
+      - session
+
+  proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile.proxy
+    environment:
+      - AUTH_TOKEN=${AUTH_TOKEN}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - TARGET_HOST=excalidraw
+      - TARGET_PORT=3001
+      - PROXY_PORT=8080
+      - BIND_HOST=0.0.0.0
+    ports:
+      - "8080:8080"
+    depends_on:
+      - excalidraw
+    networks:
+      - internal
+    profiles:
+      - session
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    command: http proxy:8080 --log stdout
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    ports:
+      - "4040:4040"
+    depends_on:
+      - proxy
+    networks:
+      - internal
+    profiles:
+      - session
+
+networks:
+  internal:

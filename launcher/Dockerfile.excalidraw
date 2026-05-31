@@ -1,0 +1,30 @@
+FROM node:22-slim
+WORKDIR /app
+
+# Copy dependency manifests first to maximize Docker layer caching.
+# This layer only rebuilds when package.json or yarn.lock change,
+# so subsequent starts skip the ~90s yarn install.
+COPY package.json yarn.lock ./
+COPY packages/excalidraw/package.json packages/excalidraw/
+COPY packages/math/package.json packages/math/
+COPY packages/utils/package.json packages/utils/
+COPY packages/common/package.json packages/common/
+COPY packages/element/package.json packages/element/
+COPY packages/fractional-indexing/package.json packages/fractional-indexing/
+COPY excalidraw-app/package.json excalidraw-app/
+COPY examples/with-nextjs/package.json examples/with-nextjs/
+COPY examples/with-script-in-browser/package.json examples/with-script-in-browser/
+
+# Install dependencies (cached unless manifests change)
+RUN yarn --frozen-lockfile --network-timeout 600000 || yarn --network-timeout 600000
+
+# Now copy the rest of the source
+COPY . .
+
+EXPOSE 3001
+# Fake xdg-open to prevent Vite from crashing when trying to open the browser
+RUN printf '#!/bin/sh\nexit 0\n' > /usr/local/bin/xdg-open && chmod +x /usr/local/bin/xdg-open
+
+# Start Vite dev server from the app directory — bind to 0.0.0.0 so Docker can reach it
+WORKDIR /app/excalidraw-app
+CMD ["npx", "vite", "--host", "0.0.0.0", "--port", "3001"]

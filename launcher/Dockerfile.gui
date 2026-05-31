@@ -1,0 +1,8 @@
+FROM node:22-alpine
+WORKDIR /app/launcher/gui
+
+# Install Docker CLI and Docker Compose so the GUI can manage the other containers
+RUN apk add --no-cache docker-cli docker-cli-compose docker-cli-buildx git
+
+# We will just run the server file directly, assuming dependencies are either none or installed via npm
+CMD ["node", "server.js"]
