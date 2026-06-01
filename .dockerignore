@@ -2,6 +2,7 @@
 node_modules
 **/node_modules
 launcher/.env
-launcher/.ngrok.log
 launcher/.vite.log
 launcher/.proxy.log
+launcher/redis-data
+launcher/tailscale-state

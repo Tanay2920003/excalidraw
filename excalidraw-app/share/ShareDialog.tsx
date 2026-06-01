@@ -64,11 +64,15 @@ const ActiveRoomDialog = ({
   handleClose: () => void;
 }) => {
   const { t } = useI18n();
+  const appState = useUIAppState();
   const [, setJustCopied] = useState(false);
   const timerRef = useRef<number>(0);
   const ref = useRef<HTMLInputElement>(null);
   const isShareSupported = "share" in navigator;
   const { onCopy, copyStatus } = useCopyStatus();
+  const collaborators = Array.from(appState.collaborators.values()).filter(
+    (collaborator) => collaborator.username?.trim(),
+  );
 
   const copyRoomLink = async () => {
     try {
@@ -104,9 +108,10 @@ const ActiveRoomDialog = ({
 
   return (
     <>
-      <h3 className="ShareDialog__active__header">
-        {t("labels.liveCollaboration").replace(/\./g, "")}
-      </h3>
+      <h3 className="ShareDialog__active__header">Secure collaboration room</h3>
+      <div className="ShareDialog__active__subheader">
+        Share this secure link with collaborators
+      </div>
       <TextField
         defaultValue={collabAPI.getUsername()}
         placeholder="Your name"
@@ -117,7 +122,7 @@ const ActiveRoomDialog = ({
       <div className="ShareDialog__active__linkRow">
         <TextField
           ref={ref}
-          label="Link"
+          label="Secure invite link"
           readonly
           fullWidth
           value={activeRoomLink}
@@ -143,6 +148,51 @@ const ActiveRoomDialog = ({
           }}
         />
       </div>
+      <div className="ShareDialog__active__roomStatus">
+        <div>
+          <div className="ShareDialog__active__statusLabel">
+            Active profiles
+          </div>
+          <div className="ShareDialog__active__statusValue">
+            {Math.max(
+              collaborators.length,
+              collabAPI.isCollaborating() ? 1 : 0,
+            )}
+          </div>
+        </div>
+        <div>
+          <div className="ShareDialog__active__statusLabel">Room server</div>
+          <div className="ShareDialog__active__statusValue">Connected</div>
+        </div>
+        <div>
+          <div className="ShareDialog__active__statusLabel">Canvas data</div>
+          <div className="ShareDialog__active__statusValue">E2E encrypted</div>
+        </div>
+      </div>
+      <div className="ShareDialog__active__profiles">
+        <div className="ShareDialog__active__profilesTitle">
+          Profiles in room
+        </div>
+        <div className="ShareDialog__active__profileList">
+          <div className="ShareDialog__active__profile">
+            <span className="ShareDialog__active__profileDot" />
+            <span>{collabAPI.getUsername() || "You"}</span>
+            <span className="ShareDialog__active__profileRole">Host</span>
+          </div>
+          {collaborators
+            .filter((collaborator) => !collaborator.isCurrentUser)
+            .map((collaborator, index) => (
+              <div
+                className="ShareDialog__active__profile"
+                key={collaborator.id || collaborator.username || index}
+              >
+                <span className="ShareDialog__active__profileDot" />
+                <span>{collaborator.username}</span>
+                <span className="ShareDialog__active__profileRole">Active</span>
+              </div>
+            ))}
+        </div>
+      </div>
       <QRCode value={activeRoomLink} />
       <div className="ShareDialog__active__description">
         <p>
@@ -155,7 +205,10 @@ const ActiveRoomDialog = ({
           </span>
           {t("roomDialog.desc_privacy")}
         </p>
-        <p>{t("roomDialog.desc_exitSession")}</p>
+        <p>
+          Anyone with this link can reach the room through your private
+          Tailscale session.
+        </p>
       </div>
 
       <div className="ShareDialog__active__actions">

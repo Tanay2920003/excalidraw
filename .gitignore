@@ -16,6 +16,8 @@ build
 dist
 firebase
 logs
+launcher/redis-data
+launcher/tailscale-state
 node_modules
 npm-debug.log*
 package-lock.json

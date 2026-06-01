@@ -64,6 +64,7 @@ export const getSyncableElements = (
 
 const BACKEND_V2_GET = import.meta.env.VITE_APP_BACKEND_V2_GET_URL;
 const BACKEND_V2_POST = import.meta.env.VITE_APP_BACKEND_V2_POST_URL;
+const PUBLIC_URL = import.meta.env.VITE_APP_PUBLIC_URL;
 
 const generateRoomId = async () => {
   const buffer = new Uint8Array(ROOM_ID_BYTES);
@@ -160,7 +161,10 @@ export const getCollaborationLink = (data: {
   roomId: string;
   roomKey: string;
 }) => {
-  return `${window.location.origin}${window.location.pathname}#room=${data.roomId},${data.roomKey}`;
+  const url = PUBLIC_URL ? new URL(PUBLIC_URL) : new URL(window.location.href);
+  url.hash = `room=${data.roomId},${data.roomKey}`;
+  url.search = "";
+  return url.toString();
 };
 
 /**

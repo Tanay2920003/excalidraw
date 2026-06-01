@@ -16,10 +16,12 @@ services:
       context: ..
       dockerfile: launcher/Dockerfile.excalidraw
     environment:
-      # Injected after ngrok is ready (two-phase start in gui/server.js).
-      # Vite bakes this at startup so all clients (local + remote) connect
-      # collab socket to the public ngrok URL, which proxies back to Vite.
-      - VITE_APP_WS_SERVER_URL=${PUBLIC_URL:-}
+      # Leave websocket URL empty so Socket.IO uses the same origin the browser
+      # opened, whether that is localhost or the Tailscale hostname.
+      - VITE_APP_WS_SERVER_URL=
+      # Room links copied from the app should point at the authenticated
+      # Tailscale URL, not localhost.
+      - VITE_APP_PUBLIC_URL=${PUBLIC_URL_WITH_AUTH:-}
       - VITE_APP_BACKEND_V2_GET_URL=/api/v2/
       - VITE_APP_BACKEND_V2_POST_URL=/api/v2/
     networks:
@@ -29,8 +31,6 @@ services:
 
   excalidraw-room:
     image: excalidraw/excalidraw-room:latest
-    ports:
-      - "3002:3002"
     networks:
       - internal
     profiles:
@@ -58,7 +58,28 @@ services:
     profiles:
       - session
 
-  proxy:
+  tailscale:
+    image: tailscale/tailscale:latest
+    hostname: ${TAILSCALE_HOSTNAME:-excalidraw-secure}
+    environment:
+      - TS_AUTHKEY=${TAILSCALE_AUTHKEY}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_USERSPACE=false
+    volumes:
+      - ./tailscale-state:/var/lib/tailscale
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    ports:
+      - "8080:8080"
+    networks:
+      - internal
+    profiles:
+      - session
+
+  proxy-tailscale:
     build:
       context: .
       dockerfile: Dockerfile.proxy
@@ -67,28 +88,18 @@ services:
       - AUTH_PASS=${AUTH_PASS}
       - TARGET_HOST=excalidraw
       - TARGET_PORT=3001
+      - ROOM_HOST=excalidraw-room
+      - ROOM_PORT=80
+      - STORAGE_HOST=excalidraw-storage-backend
+      - STORAGE_PORT=8080
       - PROXY_PORT=8080
       - BIND_HOST=0.0.0.0
-    ports:
-      - "8080:8080"
+    network_mode: service:tailscale
     depends_on:
+      - tailscale
       - excalidraw
-    networks:
-      - internal
-    profiles:
-      - session
-
-  ngrok:
-    image: ngrok/ngrok:latest
-    command: http proxy:8080 --log stdout
-    environment:
-      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
-    ports:
-      - "4040:4040"
-    depends_on:
-      - proxy
-    networks:
-      - internal
+      - excalidraw-room
+      - excalidraw-storage-backend
     profiles:
       - session
 

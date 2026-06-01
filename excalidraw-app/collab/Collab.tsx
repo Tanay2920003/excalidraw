@@ -484,16 +484,19 @@ class Collab extends PureComponent<CollabProps, CollabState> {
 
     let roomId;
     let roomKey;
+    let activeRoomLink;
 
     if (existingRoomLinkData) {
       ({ roomId, roomKey } = existingRoomLinkData);
+      activeRoomLink = window.location.href;
     } else {
       ({ roomId, roomKey } = await generateCollaborationLinkData());
-      window.history.pushState(
-        {},
-        APP_NAME,
-        getCollaborationLink({ roomId, roomKey }),
-      );
+      activeRoomLink = getCollaborationLink({ roomId, roomKey });
+
+      const localRoomLink = new URL(window.location.href);
+      localRoomLink.hash = `room=${roomId},${roomKey}`;
+      localRoomLink.search = "";
+      window.history.pushState({}, APP_NAME, localRoomLink.toString());
     }
 
     // TODO: `ImportedDataState` type here seems abused
@@ -700,7 +703,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
 
     this.initializeIdleDetector();
 
-    this.setActiveRoomLink(window.location.href);
+    this.setActiveRoomLink(activeRoomLink);
 
     return scenePromise;
   };

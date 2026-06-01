@@ -133,11 +133,86 @@
         margin: 0;
       }
 
+      &__subheader {
+        color: var(--text-primary-color);
+        font-size: 0.875rem;
+        line-height: 1.4;
+        margin-top: -1rem;
+      }
+
       &__linkRow {
         display: flex;
         flex-direction: row;
         align-items: flex-end;
         gap: 0.75rem;
+      }
+
+      &__roomStatus {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.5rem;
+
+        @include isMobile {
+          grid-template-columns: 1fr;
+        }
+
+        & > div {
+          border: 1px solid var(--dialog-border-color);
+          border-radius: 0.5rem;
+          padding: 0.625rem;
+          min-width: 0;
+        }
+      }
+
+      &__statusLabel,
+      &__profilesTitle {
+        color: var(--color-gray-60);
+        font-size: 0.6875rem;
+        font-weight: 600;
+        line-height: 1.2;
+        text-transform: uppercase;
+      }
+
+      &__statusValue {
+        color: var(--text-primary-color);
+        font-size: 0.875rem;
+        font-weight: 700;
+        line-height: 1.4;
+        margin-top: 0.25rem;
+        overflow-wrap: anywhere;
+      }
+
+      &__profiles {
+        border: 1px solid var(--dialog-border-color);
+        border-radius: 0.5rem;
+        padding: 0.75rem;
+      }
+
+      &__profileList {
+        display: flex;
+        flex-direction: column;
+        gap: 0.375rem;
+        margin-top: 0.5rem;
+      }
+
+      &__profile {
+        align-items: center;
+        display: grid;
+        gap: 0.5rem;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        min-height: 1.75rem;
+      }
+
+      &__profileDot {
+        background: var(--color-success);
+        border-radius: 50%;
+        height: 0.5rem;
+        width: 0.5rem;
+      }
+
+      &__profileRole {
+        color: var(--color-gray-60);
+        font-size: 0.75rem;
       }
 
       &__qrcode {
