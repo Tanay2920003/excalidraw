@@ -1,17 +1,7 @@
-import { DefaultSidebar, Sidebar, THEME } from "@excalidraw/excalidraw";
-import {
-  messageCircleIcon,
-  presentationIcon,
-} from "@excalidraw/excalidraw/components/icons";
-import { LinkButton } from "@excalidraw/excalidraw/components/LinkButton";
-import { useUIAppState } from "@excalidraw/excalidraw/context/ui-appState";
+import { DefaultSidebar } from "@excalidraw/excalidraw";
 
 import "./AppSidebar.scss";
 
 export const AppSidebar = () => {
-  const { theme, openSidebar } = useUIAppState();
-
-  return (
-    <DefaultSidebar />
-  );
+  return <DefaultSidebar />;
 };
