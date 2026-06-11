@@ -8,6 +8,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ..:/app
+      - session-state:/app/launcher/state
     networks:
       - internal
 
@@ -22,6 +23,8 @@ services:
       - VITE_APP_WS_SERVER_URL=${PUBLIC_URL:-}
       - VITE_APP_BACKEND_V2_GET_URL=/api/v2/
       - VITE_APP_BACKEND_V2_POST_URL=/api/v2/
+      - VITE_APP_DEFAULT_ROOM_ID=${VITE_APP_DEFAULT_ROOM_ID:-deadeddeddeeddeeddee}
+      - VITE_APP_DEFAULT_ROOM_KEY=${VITE_APP_DEFAULT_ROOM_KEY:-0000000000000000000000}
     networks:
       - internal
     profiles:
@@ -63,14 +66,14 @@ services:
       context: .
       dockerfile: Dockerfile.proxy
     environment:
-      - AUTH_USER=${AUTH_USER}
-      - AUTH_PASS=${AUTH_PASS}
       - TARGET_HOST=excalidraw
       - TARGET_PORT=3001
       - PROXY_PORT=8080
       - BIND_HOST=0.0.0.0
     ports:
       - "8080:8080"
+    volumes:
+      - session-state:/app/state
     depends_on:
       - excalidraw
     networks:
@@ -94,3 +97,6 @@ services:
 
 networks:
   internal:
+
+volumes:
+  session-state:

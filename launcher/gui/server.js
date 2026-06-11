@@ -6,15 +6,36 @@ const crypto = require('crypto');
 
 const PORT = 7842;
 const COMPOSE_DIR = path.join(__dirname, '..');
+const STATE_DIR = path.join(COMPOSE_DIR, 'state');
+if (!fs.existsSync(STATE_DIR)) {
+  try {
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+  } catch (e) {}
+}
+const USERS_FILE = path.join(STATE_DIR, 'users.json');
+const REQUESTS_FILE = path.join(STATE_DIR, 'requests.json');
 
 let sessionActive = false;
-let currentAuthUser = '';
-let currentAuthPass = '';
 let currentNgrokUrl = '';
 let currentNgrokToken = '';
 let isStarting = false;
 let hasError = false;
 let buildLogs = [];
+
+// Initialize files if they don't exist
+function initJsonFiles() {
+  try {
+    if (!fs.existsSync(USERS_FILE)) {
+      fs.writeFileSync(USERS_FILE, JSON.stringify([], null, 2));
+    }
+    if (!fs.existsSync(REQUESTS_FILE)) {
+      fs.writeFileSync(REQUESTS_FILE, JSON.stringify([], null, 2));
+    }
+  } catch (err) {
+    console.error('Error initializing state files:', err.message);
+  }
+}
+initJsonFiles();
 
 // Check if Docker images already exist so we can skip rebuilding
 function imagesExist() {
@@ -59,18 +80,24 @@ const server = http.createServer((req, res) => {
 
   if (req.url === '/api/status' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
+    let requests = [];
+    let users = [];
+    try {
+      if (fs.existsSync(REQUESTS_FILE)) requests = JSON.parse(fs.readFileSync(REQUESTS_FILE, 'utf8'));
+      if (fs.existsSync(USERS_FILE)) users = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+    } catch (e) {}
+
     res.end(JSON.stringify({
       ngrokTokenConfigured: !!currentNgrokToken,
       ngrokToken: currentNgrokToken,
       sessionActive,
       isStarting,
       hasError,
-      magicLink: currentAuthUser && currentNgrokUrl 
-        ? currentNgrokUrl.replace('https://', `https://${currentAuthUser}:${currentAuthPass}@`)
-        : null,
-      localLink: currentAuthUser 
-        ? `http://${currentAuthUser}:${currentAuthPass}@localhost:8080`
-        : null
+      magicLink: currentNgrokUrl,
+      localLink: 'http://localhost:8080',
+      requests,
+      users,
+      ngrokUrl: currentNgrokUrl
     }));
     return;
   }
@@ -116,9 +143,15 @@ const server = http.createServer((req, res) => {
         return;
       }
 
-      currentAuthUser = crypto.randomBytes(6).toString('hex');
-      currentAuthPass = crypto.randomBytes(12).toString('hex');
       currentNgrokUrl = '';
+
+      // Clear old requests and users on start
+      try {
+        fs.writeFileSync(USERS_FILE, JSON.stringify([], null, 2));
+        fs.writeFileSync(REQUESTS_FILE, JSON.stringify([], null, 2));
+      } catch (err) {
+        console.error('Error clearing state files on start:', err.message);
+      }
 
       isStarting = true;
       hasError = false;
@@ -127,9 +160,7 @@ const server = http.createServer((req, res) => {
       res.end(JSON.stringify({ success: true, message: 'Starting...' }));
 
       const composeEnv = Object.assign({}, process.env, {
-        NGROK_AUTHTOKEN: currentNgrokToken,
-        AUTH_USER: currentAuthUser,
-        AUTH_PASS: currentAuthPass
+        NGROK_AUTHTOKEN: currentNgrokToken
       });
 
       // ── PHASE 1: Start proxy + ngrok, then wait for public URL ─────────────
@@ -242,9 +273,85 @@ const server = http.createServer((req, res) => {
       sessionActive = false;
       isStarting = false;
       hasError = false;
-      currentAuthUser = '';
-      currentAuthPass = '';
       currentNgrokUrl = '';
+      // Reset state files
+      try {
+        fs.writeFileSync(USERS_FILE, JSON.stringify([], null, 2));
+        fs.writeFileSync(REQUESTS_FILE, JSON.stringify([], null, 2));
+      } catch (e) {}
+    });
+    return;
+  }
+
+  if (req.url === '/api/requests' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    try {
+      const data = fs.readFileSync(REQUESTS_FILE, 'utf8');
+      res.end(data);
+    } catch (e) {
+      res.end(JSON.stringify([]));
+    }
+    return;
+  }
+
+  if (req.url === '/api/requests/action' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const { requestId, action, role } = JSON.parse(body);
+        
+        if (!requestId || !action) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing requestId or action' }));
+          return;
+        }
+
+        let requests = [];
+        if (fs.existsSync(REQUESTS_FILE)) {
+          requests = JSON.parse(fs.readFileSync(REQUESTS_FILE, 'utf8'));
+        }
+
+        const reqIdx = requests.findIndex(r => r.requestId === requestId);
+        if (reqIdx === -1) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Request not found' }));
+          return;
+        }
+
+        const targetRequest = requests[reqIdx];
+
+        if (action === 'approve') {
+          const sessionToken = 'sess_' + crypto.randomBytes(16).toString('hex');
+          targetRequest.status = 'approved';
+          targetRequest.role = role || 'viewer';
+          targetRequest.sessionToken = sessionToken;
+
+          // Add to users.json
+          let users = [];
+          if (fs.existsSync(USERS_FILE)) {
+            users = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+          }
+          users = users.filter(u => u.username !== targetRequest.name);
+          users.push({
+            username: targetRequest.name,
+            password: sessionToken,
+            role: role || 'viewer',
+            token: sessionToken
+          });
+          fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+        } else {
+          targetRequest.status = 'denied';
+        }
+
+        fs.writeFileSync(REQUESTS_FILE, JSON.stringify(requests, null, 2));
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
     });
     return;
   }

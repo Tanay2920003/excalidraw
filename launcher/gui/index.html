@@ -58,7 +58,7 @@
           <span id="magic-link" class="magic-link" style="margin-top: 0; flex: 1;"></span>
           <button class="btn-secondary" style="width: auto; margin-bottom: 0; padding: 12px 16px;" onclick="copyToClipboard('magic-link', this)">Copy</button>
         </div>
-        <p class="hint">They can click it to join instantly. No password required.</p>
+        <p class="hint">They can open this link to request admission in the waiting room.</p>
         <div style="margin-top:15px; background: #1e1e2e; padding: 12px; border-radius: 4px; display: flex; gap: 8px; align-items: center;">
           <strong style="color: #a6adc8; font-size: 14px; white-space: nowrap;">Your local view:</strong>
           <a id="local-link" href="#" target="_blank" style="color:#89b4fa; flex: 1; font-size: 14px; word-break: break-all;">Open in new tab</a>
@@ -81,6 +81,30 @@
       
       <button id="start-btn" class="btn-primary" style="display:none;" onclick="startSession()">Start Secure Session</button>
       <button id="stop-btn" class="btn-danger" style="display:none;" onclick="stopSession()">Stop Session</button>
+
+      <!-- Waiting Room Access Control Panel -->
+      <div id="waiting-room-panel" style="display: none; margin-top: 25px; border-top: 1px solid #45475a; padding-top: 20px;">
+        <h3 style="margin-top: 0; color: #89b4fa; display: flex; align-items: center; justify-content: space-between;">
+          <span>Waiting Room</span>
+          <span id="pending-badge" style="background: #f38ba8; color: #11111b; font-size: 12px; padding: 2px 8px; border-radius: 100px; display: none;">0 pending</span>
+        </h3>
+        
+        <!-- Pending Requests -->
+        <div id="pending-requests-section" style="margin-bottom: 20px;">
+          <h4 style="margin: 0 0 10px 0; font-size: 14px; color: #a6adc8; text-align: left;">Pending Join Requests</h4>
+          <div id="pending-requests-list" style="display: flex; flex-direction: column; gap: 10px;">
+            <div style="color: #7f849c; font-style: italic; font-size: 13px; text-align: center; padding: 10px 0;">No pending requests.</div>
+          </div>
+        </div>
+        
+        <!-- Admitted Users -->
+        <div id="admitted-users-section">
+          <h4 style="margin: 0 0 10px 0; font-size: 14px; color: #a6adc8; text-align: left;">Active Guest Sessions</h4>
+          <div id="admitted-users-list" style="display: flex; flex-direction: column; gap: 10px;">
+            <div style="color: #7f849c; font-style: italic; font-size: 13px; text-align: center; padding: 10px 0;">No active guest sessions.</div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -124,6 +148,7 @@
           stopBtn.style.display = 'none';
           magicLinkBox.style.display = 'none';
           tokenEditor.style.display = 'none';
+          document.getElementById('waiting-room-panel').style.display = 'none';
           statusText.innerHTML = '<div class="loader"></div> Starting containers (may take a few minutes)...';
           
           document.getElementById('log-container').style.display = 'block';
@@ -144,7 +169,6 @@
             statusText.style.color = '#a6e3a1';
             magicLinkBox.style.display = 'block';
             magicLinkSpan.innerText = data.magicLink;
-            // Use the pre-computed local basic auth link from the backend
             localLink.href = data.localLink;
             localLink.innerText = data.localLink;
           } else {
@@ -152,11 +176,14 @@
             statusText.style.color = '#f9e2af';
             magicLinkBox.style.display = 'none';
           }
+          document.getElementById('waiting-room-panel').style.display = 'block';
+          renderWaitingRoom(data.requests || [], data.users || [], data.ngrokUrl);
         } else {
           startBtn.style.display = 'block';
           stopBtn.style.display = 'none';
           magicLinkBox.style.display = 'none';
           tokenEditor.style.display = 'block';
+          document.getElementById('waiting-room-panel').style.display = 'none';
           
           if (data.hasError) {
             document.getElementById('log-container').style.display = 'block';
@@ -221,6 +248,81 @@
         alert('Failed to copy to clipboard.');
       }
     }
+
+    function renderWaitingRoom(requests, users, ngrokUrl) {
+      // 1. Render Pending Requests
+      const pendingList = document.getElementById('pending-requests-list');
+      const pendingRequests = requests.filter(r => r.status === 'pending');
+      const pendingBadge = document.getElementById('pending-badge');
+      
+      if (pendingRequests.length > 0) {
+        pendingBadge.innerText = `${pendingRequests.length} pending`;
+        pendingBadge.style.display = 'inline-block';
+        
+        let html = '';
+        pendingRequests.forEach(req => {
+          const time = new Date(req.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          html += `
+            <div style="background: #1e1e2e; padding: 12px; border-radius: 8px; border: 1px solid rgba(243, 139, 168, 0.2); display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+              <div style="text-align: left; flex: 1; min-width: 0;">
+                <div style="font-weight: 600; color: #ffffff; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; font-size: 14px;">${escapeHtml(req.name)}</div>
+                <div style="font-size: 11px; color: #7f849c; margin-top: 2px;">Requested at ${time}</div>
+              </div>
+              <div style="display: flex; gap: 6px; flex-shrink: 0;">
+                <button class="btn-primary" style="margin: 0; padding: 6px 10px; font-size: 11px; width: auto;" onclick="handleRequestAction('${req.requestId}', 'approve', 'editor')">Editor</button>
+                <button class="btn-secondary" style="margin: 0; padding: 6px 10px; font-size: 11px; width: auto; background: #a6e3a1; color: #11111b;" onclick="handleRequestAction('${req.requestId}', 'approve', 'viewer')">Viewer</button>
+                <button class="btn-danger" style="margin: 0; padding: 6px 10px; font-size: 11px; width: auto;" onclick="handleRequestAction('${req.requestId}', 'deny')">Reject</button>
+              </div>
+            </div>
+          `;
+        });
+        pendingList.innerHTML = html;
+      } else {
+        pendingBadge.style.display = 'none';
+        pendingList.innerHTML = `<div style="color: #7f849c; font-style: italic; font-size: 13px; text-align: center; padding: 10px 0;">No pending requests.</div>`;
+      }
+
+      // 2. Render Admitted Guest Sessions
+      const admittedList = document.getElementById('admitted-users-list');
+      const guestUsers = users.filter(u => !u.isSystem);
+
+      if (guestUsers.length > 0) {
+        let html = '';
+        guestUsers.forEach(u => {
+          const roleLabel = u.role === 'editor' ? '✍️ Editor' : '👁️ Viewer';
+          const roleColor = u.role === 'editor' ? '#89b4fa' : '#a6e3a1';
+          
+          html += `
+            <div style="background: #1e1e2e; padding: 12px; border-radius: 8px; border: 1px solid #45475a; text-align: left; display: flex; justify-content: space-between; align-items: center;">
+              <strong style="color: #ffffff; font-size: 14px;">${escapeHtml(u.username)}</strong>
+              <span style="font-size: 11px; font-weight: bold; color: ${roleColor}; background: rgba(255,255,255,0.05); padding: 4px 8px; border-radius: 4px;">${roleLabel}</span>
+            </div>
+          `;
+        });
+        admittedList.innerHTML = html;
+      } else {
+        admittedList.innerHTML = `<div style="color: #7f849c; font-style: italic; font-size: 13px; text-align: center; padding: 10px 0;">No active guest sessions.</div>`;
+      }
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
+    async function handleRequestAction(requestId, action, role = 'viewer') {
+      try {
+        await fetch('/api/requests/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requestId, action, role })
+        });
+        updateStatus();
+      } catch (err) {
+        alert('Action failed');
+      }
+    }
+
+
 
     setInterval(updateStatus, 2000);
     updateStatus();

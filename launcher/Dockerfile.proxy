@@ -1,6 +1,6 @@
 FROM node:22-slim
 WORKDIR /app
-COPY proxy-server.js .
+COPY proxy-server.js waiting-room.html ./
 COPY package.json .
 RUN npm install --omit=dev
 EXPOSE 8080

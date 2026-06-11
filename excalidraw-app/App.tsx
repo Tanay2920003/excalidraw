@@ -247,6 +247,16 @@ const initializeScene = async (opts: {
   };
 
   let roomLinkData = getCollaborationLinkData(window.location.href);
+
+  // Auto-redirect to default persistent room if no other scene parameters are present
+  const DEFAULT_ROOM_ID = import.meta.env.VITE_APP_DEFAULT_ROOM_ID || "deadeddeddeeddeeddee";
+  const DEFAULT_ROOM_KEY = import.meta.env.VITE_APP_DEFAULT_ROOM_KEY || "0000000000000000000000";
+
+  if (!roomLinkData && !id && !jsonBackendMatch && !externalUrlMatch && window.location.hash !== "#local") {
+    const defaultHash = `#room=${DEFAULT_ROOM_ID},${DEFAULT_ROOM_KEY}`;
+    window.location.hash = defaultHash;
+    roomLinkData = { roomId: DEFAULT_ROOM_ID, roomKey: DEFAULT_ROOM_KEY };
+  }
   const isExternalScene = !!(id || jsonBackendMatch || roomLinkData);
   if (isExternalScene) {
     if (
@@ -914,6 +924,7 @@ const ExcalidrawWrapper = () => {
         initialData={initialStatePromiseRef.current.promise}
         isCollaborating={isCollaborating}
         onPointerUpdate={collabAPI?.onPointerUpdate}
+        viewModeEnabled={document.cookie.includes("excalidraw_role=viewer")}
         UIOptions={{
           canvasActions: {
             toggleTheme: true,

@@ -2,30 +2,100 @@
 
 const http      = require('http');
 const httpProxy = require('http-proxy');
+const fs        = require('fs');
+const path      = require('path');
+const { URL }   = require('url');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const TARGET_HOST = process.env.TARGET_HOST    || '127.0.0.1';
 const TARGET_PORT = parseInt(process.env.TARGET_PORT    || '3001',  10);
 const PROXY_PORT  = parseInt(process.env.PROXY_PORT     || '19234', 10);
 const BIND_HOST   = process.env.BIND_HOST      || '127.0.0.1';
-const AUTH_USER   = process.env.AUTH_USER;
-const AUTH_PASS   = process.env.AUTH_PASS;
 
-if (!AUTH_USER || !AUTH_PASS) {
-  console.error('[PROXY] FATAL: AUTH_USER and AUTH_PASS must be set');
-  process.exit(1);
+const STATE_DIR = path.join(__dirname, 'state');
+if (!fs.existsSync(STATE_DIR)) {
+  try {
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+  } catch (e) {}
+}
+const USERS_FILE = path.join(STATE_DIR, 'users.json');
+const REQUESTS_FILE = path.join(STATE_DIR, 'requests.json');
+const WAITING_ROOM_FILE = path.join(__dirname, 'waiting-room.html');
+
+let users = [];
+
+function loadUsers() {
+  try {
+    if (fs.existsSync(USERS_FILE)) {
+      const data = fs.readFileSync(USERS_FILE, 'utf8');
+      users = JSON.parse(data);
+      console.log(`[PROXY] Loaded ${users.length} users from users.json`);
+    } else {
+      users = [];
+    }
+  } catch (err) {
+    console.error('[PROXY] Error loading users.json:', err.message);
+    users = [];
+  }
 }
 
-// Precompute the expected Basic Auth header
-const EXPECTED_AUTH = 'Basic ' + Buffer.from(`${AUTH_USER}:${AUTH_PASS}`).toString('base64');
+// Watch users.json for changes
+if (fs.existsSync(USERS_FILE)) {
+  fs.watchFile(USERS_FILE, () => {
+    console.log('[PROXY] users.json changed, reloading...');
+    loadUsers();
+  });
+} else {
+  setInterval(() => {
+    if (users.length === 0 && fs.existsSync(USERS_FILE)) {
+      loadUsers();
+      fs.watchFile(USERS_FILE, () => {
+        console.log('[PROXY] users.json changed, reloading...');
+        loadUsers();
+      });
+    }
+  }, 5000);
+}
 
-console.log(`[PROXY] Target    : http://${TARGET_HOST}:${TARGET_PORT}`);
-console.log(`[PROXY] Listening : ${BIND_HOST}:${PROXY_PORT}`);
-console.log(`[PROXY] Basic Auth: Enabled`);
+loadUsers();
 
-// ── Auth helper ───────────────────────────────────────────────────────────────
-function isAuthenticated(req) {
-  return req.headers.authorization === EXPECTED_AUTH;
+// ── Auth helpers ───────────────────────────────────────────────────────────────
+function parseCookies(req) {
+  const list = {};
+  const rc = req.headers.cookie;
+
+  if (rc) {
+    rc.split(';').forEach(cookie => {
+      const parts = cookie.split('=');
+      list[parts.shift().trim()] = decodeURI(parts.join('='));
+    });
+  }
+
+  return list;
+}
+
+function isLocalRequest(req) {
+  const host = req.headers.host || '';
+  return host.startsWith('localhost') || host.startsWith('127.0.0.1');
+}
+
+function getAuthenticatedUser(req) {
+  // 1. Automatically trust local connection from the host machine
+  if (isLocalRequest(req)) {
+    return { username: 'Host', role: 'editor', token: 'sess_local_host' };
+  }
+
+  // 2. Check Cookie Session Token for external guests
+  const cookies = parseCookies(req);
+  const sessionToken = cookies['excalidraw_session'];
+  if (sessionToken && sessionToken.startsWith('sess_')) {
+    const matched = users.find(u => u.token === sessionToken);
+    if (matched) {
+      return matched;
+    }
+  }
+
+  return null;
 }
 
 // ── Pages ─────────────────────────────────────────────────────────────────────
@@ -107,32 +177,148 @@ proxy.on('error', (err, req, res) => {
 
 // ── HTTP server ───────────────────────────────────────────────────────────────
 const server = http.createServer((req, res) => {
-  if (isAuthenticated(req)) {
-    if (req.url && req.url.startsWith('/socket.io/')) {
-      proxy.web(req, res, { target: 'http://excalidraw-room:3002' });
-    } else if (req.url && req.url.startsWith('/api/v2/')) {
-      proxy.web(req, res, { target: 'http://excalidraw-storage-backend:8080' });
-    } else {
-      proxy.web(req, res);
+  // CORS Headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Cookie');
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200);
+    res.end();
+    return;
+  }
+
+  // Dynamic Join Request API
+  if (req.url === '/api/request-join' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const { name } = JSON.parse(body);
+        if (!name || !name.trim()) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Name is required' }));
+          return;
+        }
+
+        const requestId = 'req_' + require('crypto').randomBytes(8).toString('hex');
+        
+        let requests = [];
+        if (fs.existsSync(REQUESTS_FILE)) {
+          requests = JSON.parse(fs.readFileSync(REQUESTS_FILE, 'utf8'));
+        }
+
+        requests.push({
+          requestId,
+          name: name.trim(),
+          status: 'pending',
+          timestamp: Date.now()
+        });
+        fs.writeFileSync(REQUESTS_FILE, JSON.stringify(requests, null, 2));
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, requestId }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  if (req.url && req.url.startsWith('/api/request-status') && req.method === 'GET') {
+    const url = new URL(req.url, 'http://localhost');
+    const requestId = url.searchParams.get('requestId');
+
+    if (!requestId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Missing requestId' }));
+      return;
+    }
+
+    try {
+      let requests = [];
+      if (fs.existsSync(REQUESTS_FILE)) {
+        requests = JSON.parse(fs.readFileSync(REQUESTS_FILE, 'utf8'));
+      }
+
+      const match = requests.find(r => r.requestId === requestId);
+      if (!match) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Request not found' }));
+        return;
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        status: match.status,
+        sessionToken: match.sessionToken || null,
+        role: match.role || null
+      }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
     }
     return;
   }
 
-  // Not authenticated -> prompt for basic auth
-  res.writeHead(401, {
-    'Content-Type': 'text/plain',
-    'WWW-Authenticate': 'Basic realm="Excalidraw Secure Session"',
-    'Cache-Control': 'no-store, no-cache'
-  });
-  res.end('Access Denied. Please provide valid credentials.');
+  // Verify Authentication
+  const user = getAuthenticatedUser(req);
+  if (!user) {
+    // If it's a direct browser load, serve the waiting room instead of a 401 prompt
+    const isPage = req.url === '/' || req.url === '/index.html' || !req.url.includes('.');
+    if (isPage) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      try {
+        res.end(fs.readFileSync(WAITING_ROOM_FILE));
+      } catch (e) {
+        res.end('<h1>Excalidraw Waiting Room</h1><p>Waiting room file missing. Please contact the administrator.</p>');
+      }
+      return;
+    }
+
+    // API or Static files access -> block with 401
+    res.writeHead(401, {
+      'Content-Type': 'text/plain',
+      'Cache-Control': 'no-store, no-cache'
+    });
+    res.end('Access Denied. Session not approved.');
+    return;
+  }
+
+  // Set the dynamic role & session cookies in the response
+  const role = user.role || 'editor';
+  res.setHeader('Set-Cookie', [
+    `excalidraw_role=${role}; Path=/; SameSite=Lax; Max-Age=86400`,
+    `excalidraw_session=${user.token || ''}; Path=/; SameSite=Lax; Max-Age=86400`
+  ]);
+
+  // Block viewers from modifying drawings (POST/PUT/DELETE to backend storage api)
+  if (role === 'viewer') {
+    const isWrite = req.method !== 'GET' && req.method !== 'OPTIONS' && req.method !== 'HEAD';
+    if (isWrite && req.url && req.url.startsWith('/api/v2/')) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('Forbidden: View-only access.');
+      return;
+    }
+  }
+
+  // Proxy requests
+  if (req.url && req.url.startsWith('/socket.io/')) {
+    proxy.web(req, res, { target: 'http://excalidraw-room:3002' });
+  } else if (req.url && req.url.startsWith('/api/v2/')) {
+    proxy.web(req, res, { target: 'http://excalidraw-storage-backend:8080' });
+  } else {
+    proxy.web(req, res);
+  }
 });
 
 // ── WebSocket upgrade (Vite HMR + Excalidraw collab socket.io) ───────────────
 server.on('upgrade', (req, socket, head) => {
-  if (!isAuthenticated(req)) {
+  const user = getAuthenticatedUser(req);
+  if (!user) {
     socket.write(
       'HTTP/1.1 401 Unauthorized\r\n' +
-      'WWW-Authenticate: Basic realm="Excalidraw Secure Session"\r\n' +
       'Connection: close\r\n\r\n'
     );
     socket.destroy();
@@ -163,4 +349,5 @@ function shutdown(sig) {
 }
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT',  () => shutdown('SIGINT'));
+
 
